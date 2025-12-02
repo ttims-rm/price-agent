@@ -23,7 +23,6 @@ app.get('/macta-debug', async (req, res) => {
 
     const htmlLength = html.length;
 
-    // Leia kõik "€ xx,xx" mustriga hinnad
     const prices = [];
     const regex = /€\s*([0-9]+,[0-9]{2})/gu;
     let match;
@@ -43,51 +42,56 @@ app.get('/macta-debug', async (req, res) => {
   }
 });
 
-// Põhi-endpoint: päriselt HTML-ist loetud hind selle ühe testtoote jaoks
+// Põhi-endpoint: võtab HTML-ist selle toote kõik hinnavariandid ja valib neist madalaima
 app.get('/price/search', async (req, res) => {
-  const query = req.query.query || '';
-  const shop = req.query.shop || 'mactabeauty';
+  const shop = (req.query.shop || 'mactabeauty').toLowerCase();
 
-  // praegu toetame ainult ühte konkreetset toodet + poodi
-  const PRODUCT_URL = 'https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml';
-  const PRODUCT_NAME = 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml';
-
-  if (shop.toLowerCase() !== 'mactabeauty') {
+  if (shop !== 'mactabeauty') {
     return res.json({ products: [] });
   }
+
+  const PRODUCT_URL = 'https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml';
+  const PRODUCT_NAME = 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml';
 
   try {
     const response = await fetch(PRODUCT_URL);
     const html = await response.text();
 
-    // TITLE – loeme og:title meta pealt
+    // TITLE – og:title
     let title = PRODUCT_NAME;
     const titleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
     if (titleMatch) {
       title = titleMatch[1].trim();
     }
 
-    // IMAGE – loeme og:image meta pealt
+    // IMAGE – og:image
     let imageUrl = null;
     const imgMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
     if (imgMatch) {
       imageUrl = imgMatch[1].trim();
     }
 
-    // PRICE – otsime hinna, mis on kõige lähemal tootenimele
-    // (nimeline plokk + esimene €-hind pärast seda)
-    let price = null;
-    const priceRegex = new RegExp(
-      PRODUCT_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^€]+€\\s*([0-9]+,[0-9]{2})',
-      'u'
+    // PRICE – KÕIK samanimelised plokid + hind
+    const escapedName = PRODUCT_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pairRegex = new RegExp(
+      escapedName + '[^€]*€\\s*([0-9]+,[0-9]{2})',
+      'gu'
     );
-    const priceMatch = priceRegex.exec(html);
 
-    if (priceMatch) {
-      price = parseFloat(priceMatch[1].replace(',', '.'));
+    const candidatePrices = [];
+    let m;
+    while ((m = pairRegex.exec(html)) !== null) {
+      const num = parseFloat(m[1].replace(',', '.'));
+      if (!Number.isNaN(num)) {
+        candidatePrices.push(num);
+      }
     }
 
-    // Kui midagi kriitilist puudu – ei tagasta toodet
+    let price = null;
+    if (candidatePrices.length) {
+      price = Math.min(...candidatePrices);
+    }
+
     if (!title || !imageUrl || price === null) {
       return res.json({ products: [] });
     }
