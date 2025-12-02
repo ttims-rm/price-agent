@@ -42,23 +42,30 @@ app.get('/macta-debug', async (req, res) => {
   }
 });
 
-// Põhi-endpoint: võtab HTML-ist selle toote kõik hinnavariandid ja valib neist madalaima
+// Põhi-endpoint: kasutame query väärtust ja ettevalmistatud search-URL-i
 app.get('/price/search', async (req, res) => {
   const shop = (req.query.shop || 'mactabeauty').toLowerCase();
+  const query = (req.query.query || '').trim();
 
   if (shop !== 'mactabeauty') {
     return res.json({ products: [] });
   }
 
+  // Macta search-URL – edaspidi hakkame siit tooteid valima
+  const searchUrl = 'https://www.mactabeauty.com/catalogsearch/result/?q=' +
+    encodeURIComponent(query);
+
+  // Praegu kasutame veel sama testtoote URL-i
   const PRODUCT_URL = 'https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml';
-  const PRODUCT_NAME = 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml';
 
   try {
+    // Tulevikus: esmalt fetch(searchUrl) ja valime õige toote
+    // Praegu: fetchime ikka konkreetselt selle testtoote
     const response = await fetch(PRODUCT_URL);
     const html = await response.text();
 
     // TITLE – og:title
-    let title = PRODUCT_NAME;
+    let title = query || 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml';
     const titleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
     if (titleMatch) {
       title = titleMatch[1].trim();
@@ -71,7 +78,8 @@ app.get('/price/search', async (req, res) => {
       imageUrl = imgMatch[1].trim();
     }
 
-    // PRICE – KÕIK samanimelised plokid + hind
+    // PRICE – kõik samanimelised plokid + madalaim hind
+    const PRODUCT_NAME = 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml';
     const escapedName = PRODUCT_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const pairRegex = new RegExp(
       escapedName + '[^€]*€\\s*([0-9]+,[0-9]{2})',
@@ -104,7 +112,11 @@ app.get('/price/search', async (req, res) => {
           price,
           url: PRODUCT_URL,
           image_url: imageUrl,
-          shop: 'mactabeauty'
+          shop: 'mactabeauty',
+          _debug: {
+            query,
+            searchUrl
+          }
         }
       ]
     });
