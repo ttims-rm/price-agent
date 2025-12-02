@@ -13,7 +13,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// MactaBeauty otsing – hetkel ainult search-result parser + debug
+// MactaBeauty otsing – search-result parser + debug
 app.get('/price/search', async (req, res) => {
   const shop = (req.query.shop || 'mactabeauty').toLowerCase();
   const query = (req.query.query || '').trim();
@@ -30,15 +30,15 @@ app.get('/price/search', async (req, res) => {
     const responseSearch = await fetch(searchUrl);
     const searchHtml = await responseSearch.text();
 
-const productMatches = [...searchHtml.matchAll(
-  /<a[^>]+class="product-item-link"[^>]+href="([^"]+)"[^>]*>\s*([^<]+)\s*<\/a>/gi
-)];
+    // ÕIGE matchAll blokk
+    const productMatches = [...searchHtml.matchAll(
+      /<a[^>]+class="product-item-link"[^>]+href="([^"]+)"[^>]*>\s*([^<]+)\s*<\/a>/gi
+    )];
 
-
-const rawResults = productMatches.map(m => ({
-  url: m[1],
-  title: m[2].trim()
-}));
+    const rawResults = productMatches.map(m => ({
+      url: m[1],
+      title: m[2].trim()
+    }));
 
     // Filtreerime välja ainult toote-URLid (üks slug, ilma kategooriata)
     const searchResults = rawResults.filter(p => {
