@@ -33,14 +33,15 @@ app.get('/price/search', async (req, res) => {
     // 2) Ekstraktime KÕIK tootekardid
     // Macta kaardid: <a class="product-item-link" href="..."> PRODUCT NAME </a>
 
-    const productMatches = [...searchHtml.matchAll(
-      /<a[^>]+class="product-item-link"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi
-    )];
+// 2) Ekstraktime tootekardid server-side HTML-ist (Macta)
+const productMatches = [...searchHtml.matchAll(
+  /<li[^>]+class="item product product-item"[\s\S]*?<a[^>]+href="([^"]+)"[^>]*class="product-item-link"[^>]*>([^<]+)<\/a>/gi
+)];
 
-    const searchResults = productMatches.map(m => ({
-      url: m[1],
-      title: m[2].trim()
-    }));
+const searchResults = productMatches.map(m => ({
+  url: m[1],
+  title: m[2].trim()
+}));
 
     // Päris hinnaloogika jääb ootama next step
     return res.json({
