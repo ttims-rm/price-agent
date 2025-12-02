@@ -1,16 +1,3 @@
-const express = require('express');
-const cors = require('cors');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const PORT = process.env.PORT || 3000;
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'price-agent' });
-});
-
 app.get('/price/search', async (req, res) => {
   const shop = (req.query.shop || 'mactabeauty').toLowerCase();
   const query = (req.query.query || '').trim();
@@ -19,31 +6,30 @@ app.get('/price/search', async (req, res) => {
     return res.json({ products: [] });
   }
 
-  const brandSlug = query.toLowerCase().replace(/\s+/g, '-');
-  const brandUrl = `https://www.mactabeauty.com/${brandSlug}`;
+  const apiUrl = "https://www.mactabeauty.com/search/ajax/suggest/?q=" + encodeURIComponent(query);
 
   try {
-    const html = await fetch(brandUrl).then(r => r.text());
+    const json = await fetch(apiUrl).then(r => r.json());
 
-    const matches = [...html.matchAll(
-      /<a[^>]+class="product-item-link"[^>]+href="([^"]+)"[^>]*>\s*([^<]+)\s*<\/a>/gi
-    )];
-
-    const products = matches.map(m => ({
-      url: m[1],
-      title: m[2].trim()
+    const products = (json.products || []).map(p => ({
+      title: p.name,
+      price: parseFloat((p.price || "0").replace(",", ".")),
+      url: p.url,
+      image_url: p.image,
+      brand: p.brand || "",
+      shop: "mactabeauty"
     }));
 
-    res.json({
+    return res.json({
       products,
-      _debug: { query, brandUrl }
+      _debug: {
+        query,
+        apiUrl,
+        rawCount: json.products?.length || 0
+      }
     });
 
   } catch (e) {
-    res.json({ products: [] });
+    return res.json({ products: [] });
   }
-});
-
-app.listen(PORT, () => {
-  console.log(`price-agent listening on port ${PORT}`);
 });
