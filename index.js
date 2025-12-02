@@ -2,72 +2,45 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Health-check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// MactaBeauty otsing – search-result parser + debug
 app.get('/price/search', async (req, res) => {
   const shop = (req.query.shop || 'mactabeauty').toLowerCase();
   const query = (req.query.query || '').trim();
 
-  if (shop !== 'mactabeauty' || !query) {
+  if (!query || shop !== "mactabeauty") {
     return res.json({ products: [] });
   }
 
-  const searchUrl =
-    'https://www.mactabeauty.com/catalogsearch/result/?q=' +
-    encodeURIComponent(query);
+  const brandSlug = query.toLowerCase().replace(/\s+/g, '-');
+  const brandUrl = `https://www.mactabeauty.com/${brandSlug}`;
 
   try {
-    const responseSearch = await fetch(searchUrl);
-    const searchHtml = await responseSearch.text();
+    const html = await fetch(brandUrl).then(r => r.text());
 
-    // ÕIGE matchAll blokk
-    const productMatches = [...searchHtml.matchAll(
+    const matches = [...html.matchAll(
       /<a[^>]+class="product-item-link"[^>]+href="([^"]+)"[^>]*>\s*([^<]+)\s*<\/a>/gi
     )];
 
-    const rawResults = productMatches.map(m => ({
+    const products = matches.map(m => ({
       url: m[1],
       title: m[2].trim()
     }));
 
-    // Filtreerime välja ainult toote-URLid (üks slug, ilma kategooriata)
-    const searchResults = rawResults.filter(p => {
-      if (!p.url.startsWith('https://www.mactabeauty.com/')) return false;
-
-      const path = p.url.replace('https://www.mactabeauty.com/', '');
-
-      if (!path) return false;
-      if (path.includes('/')) return false; // alamteed → kategooriad
-
-      const banned = [
-        'customer', 'wishlist', 'joulud', 'eripakkumised', 'meik', 'korea',
-        'nagu', 'parfuumid', 'juuksed', 'keha', 'kuuned', 'meestele',
-        'toidulisandid', 'tervisetooted', 'tarvikud', 'kodu', 'brandid'
-      ];
-
-      return !banned.some(b => path.toLowerCase().startsWith(b));
+    res.json({
+      products,
+      _debug: { query, brandUrl }
     });
 
-    return res.json({
-      products: [],
-      _debug: {
-        query,
-        searchUrl,
-        searchResults
-      }
-    });
-  } catch (err) {
-    return res.json({ products: [] });
+  } catch (e) {
+    res.json({ products: [] });
   }
 });
 
