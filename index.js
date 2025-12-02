@@ -8,11 +8,12 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+// Health-check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// Põhi-endpoint – + otsingu-fetch (ainult search parsing, ilma hinnaosata)
+// MactaBeauty otsing – hetkel ainult search-result parser + debug
 app.get('/price/search', async (req, res) => {
   const shop = (req.query.shop || 'mactabeauty').toLowerCase();
   const query = (req.query.query || '').trim();
@@ -26,21 +27,37 @@ app.get('/price/search', async (req, res) => {
     encodeURIComponent(query);
 
   try {
-    // 1) FETCIME SEARCH HTML-i
     const responseSearch = await fetch(searchUrl);
     const searchHtml = await responseSearch.text();
 
-// 2) Ekstraktime tootekardid server-side HTML-ist (Macta)
-const productMatches = [...searchHtml.matchAll(
-  /<a[^>]+href="([^"]+)"[^>]+title="([^"]+)"[^>]*>/gi
-)];
+    // Leia kõik <a ... href="..." title="..."> lingid
+    const productMatches = [...searchHtml.matchAll(
+      /<a[^>]+href="([^"]+)"[^>]+title="([^"]+)"[^>]*>/gi
+    )];
 
-const searchResults = productMatches.map(m => ({
-  url: m[1],
-  title: m[2].trim()
-}));
+    const rawResults = productMatches.map(m => ({
+      url: m[1],
+      title: m[2].trim()
+    }));
 
-    // Päris hinnaloogika jääb ootama next step
+    // Filtreerime välja ainult toote-URLid (üks slug, ilma kategooriata)
+    const searchResults = rawResults.filter(p => {
+      if (!p.url.startsWith('https://www.mactabeauty.com/')) return false;
+
+      const path = p.url.replace('https://www.mactabeauty.com/', '');
+
+      if (!path) return false;
+      if (path.includes('/')) return false; // alamteed → kategooriad
+
+      const banned = [
+        'customer', 'wishlist', 'joulud', 'eripakkumised', 'meik', 'korea',
+        'nagu', 'parfuumid', 'juuksed', 'keha', 'kuuned', 'meestele',
+        'toidulisandid', 'tervisetooted', 'tarvikud', 'kodu', 'brandid'
+      ];
+
+      return !banned.some(b => path.toLowerCase().startsWith(b));
+    });
+
     return res.json({
       products: [],
       _debug: {
@@ -49,7 +66,6 @@ const searchResults = productMatches.map(m => ({
         searchResults
       }
     });
-
   } catch (err) {
     return res.json({ products: [] });
   }
