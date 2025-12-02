@@ -13,7 +13,37 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// Main price search endpoint (dummy for now)
+// Macta debug endpoint – näeme, mida server tegelikult HTML-ist leiab
+app.get('/macta-debug', async (req, res) => {
+  const PRODUCT_URL = 'https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml';
+
+  try {
+    const response = await fetch(PRODUCT_URL);
+    const html = await response.text();
+
+    const htmlLength = html.length;
+
+    // Leia kõik "€ xx,xx" mustriga hinnad
+    const prices = [];
+    const regex = /€\s*([0-9]+,[0-9]{2})/gu;
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      prices.push(match[1]);
+    }
+
+    res.json({
+      htmlLength,
+      prices
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: true,
+      message: err.message
+    });
+  }
+});
+
+// Main price search endpoint (dummy for now – endiselt 29.95)
 app.get('/price/search', (req, res) => {
   const query = req.query.query || '';
   const shop = req.query.shop || 'mactabeauty';
