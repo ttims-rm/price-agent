@@ -43,23 +43,70 @@ app.get('/macta-debug', async (req, res) => {
   }
 });
 
-// Main price search endpoint (dummy for now – endiselt 29.95)
-app.get('/price/search', (req, res) => {
+// Põhi-endpoint: päriselt HTML-ist loetud hind selle ühe testtoote jaoks
+app.get('/price/search', async (req, res) => {
   const query = req.query.query || '';
   const shop = req.query.shop || 'mactabeauty';
 
-  res.json({
-    products: [
-      {
-        title: 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml',
-        brand: 'Luvum',
-        price: 29.95,
-        url: 'https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml',
-        image_url: 'https://www.mactabeauty.com/media/catalog/product/cache/2ca48355efdb0980405b1b94c9713b2e/l/u/luvum_slow_aging_phyto_collagen_cream_50ml_1_.png',
-        shop
-      }
-    ]
-  });
+  // praegu toetame ainult ühte konkreetset toodet + poodi
+  const PRODUCT_URL = 'https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml';
+  const PRODUCT_NAME = 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml';
+
+  if (shop.toLowerCase() !== 'mactabeauty') {
+    return res.json({ products: [] });
+  }
+
+  try {
+    const response = await fetch(PRODUCT_URL);
+    const html = await response.text();
+
+    // TITLE – loeme og:title meta pealt
+    let title = PRODUCT_NAME;
+    const titleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
+    if (titleMatch) {
+      title = titleMatch[1].trim();
+    }
+
+    // IMAGE – loeme og:image meta pealt
+    let imageUrl = null;
+    const imgMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+    if (imgMatch) {
+      imageUrl = imgMatch[1].trim();
+    }
+
+    // PRICE – otsime hinna, mis on kõige lähemal tootenimele
+    // (nimeline plokk + esimene €-hind pärast seda)
+    let price = null;
+    const priceRegex = new RegExp(
+      PRODUCT_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^€]+€\\s*([0-9]+,[0-9]{2})',
+      'u'
+    );
+    const priceMatch = priceRegex.exec(html);
+
+    if (priceMatch) {
+      price = parseFloat(priceMatch[1].replace(',', '.'));
+    }
+
+    // Kui midagi kriitilist puudu – ei tagasta toodet
+    if (!title || !imageUrl || price === null) {
+      return res.json({ products: [] });
+    }
+
+    return res.json({
+      products: [
+        {
+          title,
+          brand: 'Luvum',
+          price,
+          url: PRODUCT_URL,
+          image_url: imageUrl,
+          shop: 'mactabeauty'
+        }
+      ]
+    });
+  } catch (err) {
+    return res.json({ products: [] });
+  }
 });
 
 app.listen(PORT, () => {
