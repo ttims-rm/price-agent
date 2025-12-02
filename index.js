@@ -8,118 +8,50 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Health-check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// Macta debug endpoint – näeme, mida server tegelikult HTML-ist leiab
-app.get('/macta-debug', async (req, res) => {
-  const PRODUCT_URL = 'https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml';
-
-  try {
-    const response = await fetch(PRODUCT_URL);
-    const html = await response.text();
-
-    const htmlLength = html.length;
-
-    const prices = [];
-    const regex = /€\s*([0-9]+,[0-9]{2})/gu;
-    let match;
-    while ((match = regex.exec(html)) !== null) {
-      prices.push(match[1]);
-    }
-
-    res.json({
-      htmlLength,
-      prices
-    });
-  } catch (err) {
-    res.status(500).json({
-      error: true,
-      message: err.message
-    });
-  }
-});
-
-// Põhi-endpoint: kasutame query väärtust ja ettevalmistatud search-URL-i
+// Põhi-endpoint – + otsingu-fetch (ainult search parsing, ilma hinnaosata)
 app.get('/price/search', async (req, res) => {
   const shop = (req.query.shop || 'mactabeauty').toLowerCase();
   const query = (req.query.query || '').trim();
 
-  if (shop !== 'mactabeauty') {
+  if (shop !== 'mactabeauty' || !query) {
     return res.json({ products: [] });
   }
 
-  // Macta search-URL – edaspidi hakkame siit tooteid valima
-  const searchUrl = 'https://www.mactabeauty.com/catalogsearch/result/?q=' +
+  const searchUrl =
+    'https://www.mactabeauty.com/catalogsearch/result/?q=' +
     encodeURIComponent(query);
 
-  // Praegu kasutame veel sama testtoote URL-i
-  const PRODUCT_URL = 'https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml';
-
   try {
-    // Tulevikus: esmalt fetch(searchUrl) ja valime õige toote
-    // Praegu: fetchime ikka konkreetselt selle testtoote
-    const response = await fetch(PRODUCT_URL);
-    const html = await response.text();
+    // 1) FETCIME SEARCH HTML-i
+    const responseSearch = await fetch(searchUrl);
+    const searchHtml = await responseSearch.text();
 
-    // TITLE – og:title
-    let title = query || 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml';
-    const titleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
-    if (titleMatch) {
-      title = titleMatch[1].trim();
-    }
+    // 2) Ekstraktime KÕIK tootekardid
+    // Macta kaardid: <a class="product-item-link" href="..."> PRODUCT NAME </a>
 
-    // IMAGE – og:image
-    let imageUrl = null;
-    const imgMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
-    if (imgMatch) {
-      imageUrl = imgMatch[1].trim();
-    }
+    const productMatches = [...searchHtml.matchAll(
+      /<a[^>]+class="product-item-link"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/gi
+    )];
 
-    // PRICE – kõik samanimelised plokid + madalaim hind
-    const PRODUCT_NAME = 'Luvum Slow Aging Phyto Collagen Cream fütokollageeni kreem 50ml';
-    const escapedName = PRODUCT_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pairRegex = new RegExp(
-      escapedName + '[^€]*€\\s*([0-9]+,[0-9]{2})',
-      'gu'
-    );
+    const searchResults = productMatches.map(m => ({
+      url: m[1],
+      title: m[2].trim()
+    }));
 
-    const candidatePrices = [];
-    let m;
-    while ((m = pairRegex.exec(html)) !== null) {
-      const num = parseFloat(m[1].replace(',', '.'));
-      if (!Number.isNaN(num)) {
-        candidatePrices.push(num);
-      }
-    }
-
-    let price = null;
-    if (candidatePrices.length) {
-      price = Math.min(...candidatePrices);
-    }
-
-    if (!title || !imageUrl || price === null) {
-      return res.json({ products: [] });
-    }
-
+    // Päris hinnaloogika jääb ootama next step
     return res.json({
-      products: [
-        {
-          title,
-          brand: 'Luvum',
-          price,
-          url: PRODUCT_URL,
-          image_url: imageUrl,
-          shop: 'mactabeauty',
-          _debug: {
-            query,
-            searchUrl
-          }
-        }
-      ]
+      products: [],
+      _debug: {
+        query,
+        searchUrl,
+        searchResults
+      }
     });
+
   } catch (err) {
     return res.json({ products: [] });
   }
