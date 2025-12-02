@@ -1,8 +1,24 @@
+const express = require('express');
+const cors = require('cors');
+const fetch = require('node-fetch');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
+
+// Health
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', service: 'price-agent' });
+});
+
+// MactaBeauty search – AJAX API
 app.get('/price/search', async (req, res) => {
   const shop = (req.query.shop || 'mactabeauty').toLowerCase();
   const query = (req.query.query || '').trim();
 
-  if (!query || shop !== "mactabeauty") {
+  if (shop !== "mactabeauty" || !query) {
     return res.json({ products: [] });
   }
 
@@ -13,10 +29,10 @@ app.get('/price/search', async (req, res) => {
 
     const products = (json.products || []).map(p => ({
       title: p.name,
+      brand: p.brand || "",
       price: parseFloat((p.price || "0").replace(",", ".")),
       url: p.url,
       image_url: p.image,
-      brand: p.brand || "",
       shop: "mactabeauty"
     }));
 
@@ -25,11 +41,15 @@ app.get('/price/search', async (req, res) => {
       _debug: {
         query,
         apiUrl,
-        rawCount: json.products?.length || 0
+        count: products.length
       }
     });
 
   } catch (e) {
     return res.json({ products: [] });
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`price-agent listening on port ${PORT}`);
 });
