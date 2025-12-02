@@ -30,9 +30,9 @@ app.get('/price/search', async (req, res) => {
     const responseSearch = await fetch(searchUrl);
     const searchHtml = await responseSearch.text();
 
-// 2) Ekstraktime tootekardid (server-side HTML)
+// 2) Ekstraktime tootekardid server-side HTML-ist (Macta)
 const productMatches = [...searchHtml.matchAll(
-  /<a[^>]+href="([^"]+)"[^>]*class="product-item-link"[^>]*>\s*([^<]+)\s*<\/a>/gi
+  /<a[^>]+href="([^"]+)"[^>]+title="([^"]+)"[^>]*>/gi
 )];
 
 const searchResults = productMatches.map(m => ({
