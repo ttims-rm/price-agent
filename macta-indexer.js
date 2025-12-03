@@ -56,13 +56,42 @@ async function fetchSitemapUrls(url) {
     }
 
     // 2) Filtreeri ainult Macta päris tootelehed
-    const productUrls = [...allUrls].filter(u => {
-      if (!u.startsWith('https://www.mactabeauty.com/')) return false;
-      if (u.endsWith('.xml')) return false;
-      if (u.includes('/media/')) return false;
-      if (u.includes('/pub/')) return false;
-      return true;
-    });
+const productUrls = [...allUrls].filter(u => {
+  if (!u.startsWith('https://www.mactabeauty.com/')) return false;
+  if (u.endsWith('.xml')) return false;
+  if (u.includes('/media/')) return false;
+  if (u.includes('/pub/')) return false;
+
+  const path = u
+    .replace('https://www.mactabeauty.com/', '')
+    .replace(/\/+$/, '');
+
+  // välista tühjad ja kõik, millel on alamteed (brand/, kategooriad jne)
+  if (!path) return false;
+  if (path.includes('/')) return false;
+
+  const banned = [
+    'customer',
+    'wishlist',
+    'joulud',
+    'eripakkumised',
+    'meik',
+    'korea',
+    'nagu',
+    'parfuumid',
+    'juuksed',
+    'keha',
+    'kuuned',
+    'meestele',
+    'toidulisandid',
+    'tervisetooted',
+    'tarvikud',
+    'kodu',
+    'brandid'
+  ];
+
+  return !banned.some(b => path.toLowerCase().startsWith(b));
+});
 
     console.log('→ Kokku unikaalseid tootelehti pärast filtrit:', productUrls.length);
 
