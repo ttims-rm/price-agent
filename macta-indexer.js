@@ -1,10 +1,14 @@
 // macta-indexer.js
-// Tõmbab Macta sitemapid, leiab tootelehed ja teeb macta-products.json
+// Loeb Macta sitemap_001.xml + sitemap_002.xml, tõmbab kõik tooted
+// ja salvestab need macta-products.json faili.
 
 const fs = require('fs');
 const fetch = require('node-fetch');
 
-const SITEMAP_URL = 'https://www.mactabeauty.com/sitemap.xml';
+const PRODUCT_SITEMAPS = [
+  'https://www.mactabeauty.com/pub/media/sitemap_001.xml',
+  'https://www.mactabeauty.com/pub/media/sitemap_002.xml'
+];
 
 function decodeHtml(str) {
   if (!str) return '';
@@ -20,84 +24,57 @@ function decodeHtml(str) {
     .trim();
 }
 
-function extractLocs(xml) {
-  const matches = [...xml.matchAll(/<loc>([^<]+)<\/loc>/gi)];
-  return matches.map(m => m[1].trim());
-}
-
-function looksLikeProductUrl(url) {
-  if (!url.startsWith('https://www.mactabeauty.com/')) return false;
-  if (url.endsWith('.xml')) return false;
-
-  // võta ainult “slugid” (mitte kategooria alamteed)
-  const path = url.replace('https://www.mactabeauty.com/', '').replace(/\/+$/, '');
-  if (!path) return false;
-  if (path.includes('/')) return false; // alamteed = suure tõenäosusega kategooria
-
-  // filtreeri ilmsed üldlehed välja
-  const banned = [
-    'joulud', 'eripakkumised', 'meik', 'korea', 'nagu', 'parfuumid', 'juuksed',
-    'keha', 'kuuned', 'meestele', 'toidulisandid', 'tervisetooted',
-    'tarvikud', 'kodu', 'brandid', 'customer', 'wishlist'
-  ];
-  const lower = path.toLowerCase();
-  if (banned.some(b => lower.startsWith(b))) return false;
-
-  // tõenäoline tooteleht
-  return true;
-}
-
 async function fetchText(url) {
   const res = await fetch(url, { timeout: 20000 });
   if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + url);
   return await res.text();
 }
 
+async function fetchSitemapUrls(url) {
+  console.log('→ Laen sitemap:', url);
+  const xml = await fetchText(url);
+
+  const urls = [];
+  const re = /<loc>([^<]+)<\/loc>/gi;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const loc = m[1].trim();
+    urls.push(loc);
+  }
+  console.log('→ Sitemapis leidsin URL-e:', urls.length);
+  return urls;
+}
+
 (async () => {
   try {
-    console.log('→ Laen peamise sitemapi:', SITEMAP_URL);
-    const sitemapXml = await fetchText(SITEMAP_URL);
-    const sitemapUrls = extractLocs(sitemapXml);
+    const allUrls = new Set();
 
-    // Võta kõik alam-sitemapid (product/category jne)
-    const childSitemaps = sitemapUrls.filter(u => u.endsWith('.xml'));
-    console.log('→ Leidsin alam-sitemape:', childSitemaps.length);
-
-    let allUrls = [];
-
-    for (const sm of childSitemaps) {
-      try {
-        console.log('→ Laen alam-sitemapi:', sm);
-        const xml = await fetchText(sm);
-        const locs = extractLocs(xml);
-        allUrls.push(...locs);
-      } catch (e) {
-        console.log('× Ei õnnestunud sitemap:', sm, e.message);
-      }
+    // 1) Kogu URL-id sitemapidest
+    for (const sm of PRODUCT_SITEMAPS) {
+      const urls = await fetchSitemapUrls(sm);
+      urls.forEach(u => allUrls.add(u));
     }
 
-    // Kui mingil põhjusel alam-sitemappe ei tule, kasuta ka peamist
-    if (allUrls.length === 0) {
-      allUrls = extractLocs(sitemapXml);
-    }
+    // 2) Filtreeri ainult Macta päris tootelehed
+    const productUrls = [...allUrls].filter(u => {
+      if (!u.startsWith('https://www.mactabeauty.com/')) return false;
+      if (u.endsWith('.xml')) return false;
+      if (u.includes('/media/')) return false;
+      if (u.includes('/pub/')) return false;
+      return true;
+    });
 
-    // Filtreeri välja tootelehtede URL-id
-    const productUrls = [...new Set(allUrls.filter(looksLikeProductUrl))];
-
-    console.log('→ Tõenäolisi tootelehti:', productUrls.length);
+    console.log('→ Kokku unikaalseid tootelehti pärast filtrit:', productUrls.length);
 
     const products = [];
 
-    // Vajadusel võid ajutiselt piirata, nt:
-    // const toProcess = productUrls.slice(0, 300);
-    const toProcess = productUrls;
-
-    for (const url of toProcess) {
+    // 3) Käime iga tootelehe läbi ja võtame minimaalse meta (title, brand)
+    for (const url of productUrls) {
       try {
         console.log('→ Toode:', url);
         const html = await fetchText(url);
 
-        // Pealkiri – võtame <title> ja eemaldame " | Macta Beauty"
+        // <title> … | Macta Beauty
         let title = '';
         const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
         if (titleMatch) {
@@ -106,7 +83,7 @@ async function fetchText(url) {
           );
         }
 
-        // Bränd – schema.org JSON-LD "brand" väli
+        // brand JSON-LD-st
         let brand = '';
         const brandMatch = html.match(
           /"brand"\s*:\s*{\s*"@type"\s*:\s*"Brand"\s*,\s*"name"\s*:\s*"([^"]+)"/i
