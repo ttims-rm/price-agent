@@ -1,67 +1,49 @@
-const fs = require("fs");
-const fetch = require("node-fetch");
+// macta-indexer.js
+const fs = require('fs');
+const fetch = require('node-fetch');
 
-// Macta kategooria – testime ainult ühte kategooriat: näokreemid
-const CATEGORY_URL = "https://www.mactabeauty.com/naohooldus/naokreemid";
+const CATEGORY_URL = 'https://www.mactabeauty.com/naohooldus/naokreemid';
+const OUT_FILE = 'macta-products.json';
 
-// Lihtne utiliit
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function run() {
-  console.log("→ Laen kategooria HTML...");
-
-  const html = await (await fetch(CATEGORY_URL)).text();
-  const clean = html.replace(/\s+/g, " ");
-
-  console.log("→ Otsin kategooriast tootelehti...");
-
-  // Võtab kõik toote-URLid kategooriast
-  const matches = [...clean.matchAll(/<a[^>]+class="product-item-link"[^>]+href="([^"]+)"/gi)];
-
-  const urls = [...new Set(matches.map((m) => m[1]))];
-
-  console.log("→ Leidsin URL-id:", urls.length);
-
-  const products = [];
-
-  for (let url of urls) {
-    console.log("→ Laen tootelehte:", url);
-
-    const html2 = await (await fetch(url)).text();
-    const c2 = html2.replace(/\s+/g, " ");
-
-    // bränd
-    const brandMatch = c2.match(/"brand"\s*:\s*"([^"]+)"/);
-    const brand = brandMatch ? brandMatch[1] : "";
-
-    // nimi
-    const titleMatch = c2.match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i);
-    const title = titleMatch ? titleMatch[1] : "";
-
-    // pilt
-    const imgMatch = c2.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i);
-    const image_url = imgMatch ? imgMatch[1] : "";
-
-    // väärtused indeksiks
-    products.push({
-      id: url.split("/").pop().replace(".html", ""),
-      shop: "mactabeauty",
-      url,
-      title,
-      brand,
-      keywords: [
-        ...title.toLowerCase().split(" ").filter(w => w.length > 2),
-        brand.toLowerCase()
-      ]
-    });
-
-    await sleep(300); // õrn paus (vältida 429 rate limiting)
+function slugFromUrl(url) {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.replace(/^\/+|\/+$/g, '');
+    const parts = path.split('/');
+    const last = parts[parts.length - 1] || parts[parts.length - 2] || path;
+    return last.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  } catch (e) {
+    return url.toLowerCase().replace(/https?:\/\//, '').replace(/[^a-z0-9]+/g, '-');
   }
-
-  console.log("→ Salvestan macta-products.json");
-  fs.writeFileSync("macta-products.json", JSON.stringify(products, null, 2));
-
-  console.log("→ Valmis.");
 }
 
-run();
+(async () => {
+  console.log('→ Laen kategooria HTML...');
+  const resp = await fetch(CATEGORY_URL);
+  const html = await resp.text();
+
+  console.log('→ Otsin kategooriast tootelehti...');
+
+  // Võtab kõik <a ... class="product-item-link"... href="..."> lingid
+  const productMatches = [...html.matchAll(
+    /<a[^>]*class="[^"]*product-item-link[^"]*"[^>]*href="([^"]+)"[^>]*>/gi
+  )];
+
+  // Unikaalsed URL-id
+  const urls = [...new Set(productMatches.map(m => m[1]))];
+
+  console.log('→ Leidsin URL-id:', urls.length);
+
+  const products = urls.map(url => ({
+    id: slugFromUrl(url),
+    shop: 'mactabeauty',
+    url
+  }));
+
+  fs.writeFileSync(OUT_FILE, JSON.stringify(products, null, 2));
+  console.log('→ Salvestan', OUT_FILE);
+  console.log('→ Valmis.');
+})().catch(err => {
+  console.error('Indexer error:', err);
+  process.exit(1);
+});
