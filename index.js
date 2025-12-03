@@ -10,8 +10,13 @@ const PORT = process.env.PORT || 3000;
 
 // Väike HTML-dekooder (&#x20; jne)
 function decodeHtml(str = '') {
-  return str
+  return (str || '')
+    // &#xE4; stiilis HTML
     .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    )
+    // \u00e4 stiilis JSON unicode
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
       String.fromCharCode(parseInt(hex, 16))
     )
     .replace(/&amp;/g, '&')
