@@ -43,6 +43,12 @@ const mactaIndex = mactaUrls
   })
   .filter(Boolean);
 
+// Ajutine manuaalne lisandus: Friendly plekieemaldaja (mitte näokreemide kategoorias)
+mactaIndex.push({
+  url: 'https://www.mactabeauty.com/friendly-organic-stain-remover-orgaaniline-plekieemaldaja-250ml',
+  slug: 'friendly-organic-stain-remover-orgaaniline-plekieemaldaja-250ml'
+});
+
 
 // Lisasõnad 3 testtootele (aidab fuzzy’t)
 const MANUAL_ALIASES = {
