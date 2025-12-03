@@ -2,9 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 
-const { generateSlugs } = require('./utils');
-const { fetchProductData } = require('./fetchProduct');
-
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -16,85 +13,86 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// Põhi-endpoint: slug + fuzzy + scrape
-app.get('/price/search', async (req, res) => {
-  const shop = (req.query.shop || 'mactabeauty').toLowerCase();
-  const query = (req.query.query || '').trim();
+/**
+ * Universaalne hinna-adapter:
+ * GET /price/fetch?shop=mactabeauty&url=...
+ *
+ * Praegu toetab ainult MactaBeauty toodetelehti.
+ */
+app.get('/price/fetch', async (req, res) => {
+  const shop = (req.query.shop || '').toLowerCase();
+  const url = (req.query.url || '').trim();
 
-  if (shop !== 'mactabeauty' || !query) {
+  if (!shop || !url) {
     return res.json({ products: [] });
   }
 
-  const slugs = generateSlugs(query);
-  const base = 'https://www.mactabeauty.com/';
-
-  const candidates = [];
-
-  for (const slug of slugs) {
-    const url = base + slug;
-
-    try {
-      const resp = await fetch(url, { method: 'GET' });
-
-      // Kui lehte pole või redirectib otsingule/kategooriale, jäta vahele
-      if (resp.status !== 200) continue;
-      if (resp.url.includes('/catalogsearch') || resp.url.includes('/catalog/')) continue;
-
-      // Võtame päris andmed HTML-ist
-      const data = await fetchProductData(resp.url);
-      if (!data || !data.price || !data.title) continue;
-
-      candidates.push(data);
-    } catch (e) {
-      continue;
-    }
+  if (shop !== 'mactabeauty') {
+    return res.json({ products: [] });
   }
 
-  if (!candidates.length) {
+  try {
+    const html = await fetch(url).then(r => r.text());
+
+    // Toote nimi (H1)
+    let title = '';
+    const h1Match = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
+    if (h1Match) {
+      title = h1Match[1].replace(/<[^>]*>/g, '').trim();
+    }
+
+    // Hinnad – korjame kõik data-price-amount väärtused ja võtame väikseima (>0)
+    const priceMatches = [...html.matchAll(/data-price-amount="([\d.,]+)"/gi)];
+    const priceCandidates = priceMatches
+      .map(m => parseFloat(m[1].replace(',', '.')))
+      .filter(n => !isNaN(n) && n > 0);
+
+    const price =
+      priceCandidates.length > 0
+        ? Math.min(...priceCandidates)
+        : 0;
+
+    // Pilt – proovime esmalt product-galerii pilti
+    let image_url = '';
+    const imgMatch =
+      html.match(/<img[^>]+class="gallery-placeholder__image"[^>]+src="([^"]+)"/i) ||
+      html.match(/<img[^>]+class="fotorama__img"[^>]+src="([^"]+)"/i) ||
+      html.match(/<img[^>]+src="([^"]+)"[^>]+class="product-image-photo"/i);
+    if (imgMatch) {
+      image_url = imgMatch[1];
+    }
+
+    // Bränd – kui leiame breadcrumbis või meta väljal
+    let brand = '';
+    const brandMatch =
+      html.match(/"brand"\s*:\s*{\s*"@type"\s*:\s*"Brand"\s*,\s*"name"\s*:\s*"([^"]+)"/i) ||
+      html.match(/itemprop="brand"[^>]*>\s*<span[^>]*>([^<]+)<\/span>/i);
+    if (brandMatch) {
+      brand = brandMatch[1].trim();
+    }
+
+    const product = {
+      title,
+      brand,
+      price,
+      url,
+      image_url,
+      shop: 'mactabeauty'
+    };
+
     return res.json({
-      products: [],
+      products: price > 0 ? [product] : [],
       _debug: {
-        query,
-        slugs,
-        found: 0
+        shop,
+        url,
+        title,
+        priceCandidates,
+        priceChosen: price
       }
     });
+  } catch (e) {
+    return res.json({ products: [] });
   }
-
-  // Lihtne "fuzzy": loe, mitu otsingu sõna esineb pealkirjas
-  const qWords = query.toLowerCase().split(/\s+/).filter(Boolean);
-
-  const scored = candidates.map(p => {
-    const t = (p.title || '').toLowerCase();
-    let score = 0;
-    qWords.forEach(w => {
-      if (t.includes(w)) score++;
-    });
-    return { product: p, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-
-  const best = scored[0].product;
-
-  return res.json({
-    products: [
-      {
-        title: best.title,
-        brand: best.brand,
-        price: best.price,
-        url: best.url,
-        image_url: best.image_url,
-        shop: 'mactabeauty'
-      }
-    ],
-    _debug: {
-      query,
-      slugs,
-      tried: candidates.length,
-      chosenTitle: best.title
-    }
-  });
 });
 
 app.listen(PORT, () => {
