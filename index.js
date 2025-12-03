@@ -25,17 +25,24 @@ try {
   mactaUrls = [];
 }
 
-// Loome slug’i põhise indeksi
-const mactaIndex = mactaUrls.map((url) => {
-  const clean = url
-    .replace('https://www.mactabeauty.com/', '')
-    .replace(/\.html?$/i, '')
-    .replace(/\/$/, '');
-  return {
-    url,
-    slug: clean.toLowerCase(), // nt "luvum-slow-aging-phyto-collagen-cream-50ml"
-  };
-});
+// Loome slug’i põhise indeksi (talub nii stringe kui objekte)
+const mactaIndex = mactaUrls
+  .map((item) => {
+    const url = typeof item === 'string' ? item : item.url;
+    if (!url) return null;
+
+    const clean = url
+      .replace('https://www.mactabeauty.com/', '')
+      .replace(/\.html?$/i, '')
+      .replace(/\/$/, '');
+
+    return {
+      url,
+      slug: clean.toLowerCase(),
+    };
+  })
+  .filter(Boolean);
+
 
 // Lisasõnad 3 testtootele (aidab fuzzy’t)
 const MANUAL_ALIASES = {
