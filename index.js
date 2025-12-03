@@ -55,12 +55,12 @@ app.get('/price/macta', async (req, res) => {
     );
     if (brandMatch) brand = decodeHtml(brandMatch[1]);
 
-    // --- PRICE: eelistame FinalPrice skriptiblokist ---
+    // --- PRICE: eelistame Klaviyo JSON-i FinalPrice ---
     let price = 0;
 
-    const finalPriceMatch = html.match(/FinalPrice[^0-9]*([\d.,]+)/i);
+    const finalPriceMatch = html.match(/"FinalPrice"\s*:\s*"([\d.]+)"/i);
     if (finalPriceMatch) {
-      price = parseFloat(finalPriceMatch[1].replace(',', '.'));
+      price = parseFloat(finalPriceMatch[1]);
     } else {
       // Fallback: product:price:amount või schema price
       const metaPriceMatch = html.match(
