@@ -1,6 +1,7 @@
-const express = require('express');
-const cors = require('cors');
-const fetch = require('node-fetch');
+const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const fetch = require("node-fetch");
 
 const app = express();
 app.use(cors());
@@ -8,147 +9,115 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-function decodeHtml(str = '') {
-  return (str || '')
-    // &#xE4; stiilis HTML
-    .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
-    )
-    // \u00e4 stiilis JSON unicode
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
-    )
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+// ---- Laeme Macta tooteindeksi ----
+const mactaIndex = JSON.parse(
+  fs.readFileSync("macta-products.json", "utf8")
+);
+
+// ---- Abifunktsioon: normaliseeri tekst ----
+function norm(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
-// ─────────────────────────────
-// Macta – üksiku tootelehe adapter
-// ─────────────────────────────
-async function fetchMactaProduct(url) {
-  if (!url.startsWith('https://www.mactabeauty.com/')) {
-    return { products: [], _debug: { url, error: 'invalid-url' } };
+// ---- Sarnasusskoor (väike ja kiire) ----
+function score(query, product) {
+  const q = norm(query);
+  const text = norm(
+    product.title + " " + product.brand + " " + product.keywords.join(" ")
+  );
+
+  let hits = 0;
+  for (let word of q.split(" ")) {
+    if (word.length < 2) continue;
+    if (text.includes(word)) hits++;
   }
-
-  const html = await fetch(url).then(r => r.text());
-
-  // TITLE
-  let title = '';
-  const ogTitleMatch = html.match(
-    /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i
-  );
-  if (ogTitleMatch) {
-    title = decodeHtml(ogTitleMatch[1]);
-  } else {
-    const titleMatch = html.match(/"name"\s*:\s*"([^"]+)"/i);
-    if (titleMatch) title = decodeHtml(titleMatch[1]);
-  }
-
-  // BRAND
-  let brand = '';
-  const brandMatch = html.match(
-    /"brand"\s*:\s*{\s*"@type":"Brand","name":"([^"]+)"/i
-  );
-  if (brandMatch) brand = decodeHtml(brandMatch[1]);
-
-  // PRICE – meta product:price:amount (kehtiv hind – soodukas või tava)
-  let price = 0;
-  const metaPriceMatch = html.match(
-    /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i
-  );
-  if (metaPriceMatch) {
-    price = parseFloat(metaPriceMatch[1].replace(',', '.'));
-  }
-
-  // IMAGE
-  let image_url = '';
-  const imgJsonMatch = html.match(/"image"\s*:\s*"([^"]+)"/i);
-  const imgOgMatch = html.match(
-    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
-  );
-  if (imgJsonMatch) image_url = imgJsonMatch[1];
-  else if (imgOgMatch) image_url = imgOgMatch[1];
-  image_url = image_url.replace(/\\\//g, '/');
-
-  const product = {
-    title,
-    brand,
-    price,
-    url,
-    image_url,
-    shop: 'mactabeauty'
-  };
-
-  return {
-    products: price > 0 ? [product] : [],
-    _debug: { url, title, brand, price, image_url }
-  };
+  return hits;
 }
 
-// ─────────────────────────────
-// Health
-// ─────────────────────────────
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'price-agent' });
-});
-
-// ─────────────────────────────
-// 1) Tootelehe põhine: /price/macta?url=...
-// ─────────────────────────────
-app.get('/price/macta', async (req, res) => {
-  const url = (req.query.url || '').trim();
+// ---- Hind + info tootelehelt ----
+async function fetchLiveData(url) {
   try {
-    const result = await fetchMactaProduct(url);
-    res.json(result);
-  } catch (err) {
-    res.json({ products: [] });
+    const html = await (await fetch(url)).text();
+
+    const clean = html.replace(/\s+/g, " ");
+
+    // HIND – võta viimane number (soodushind)
+    const priceMatch = clean.match(/"price"\s*:\s*"(\d+[,\.]\d+)"/);
+    const price = priceMatch ? parseFloat(priceMatch[1].replace(",", ".")) : 0;
+
+    // PEALKIRI
+    const titleMatch = clean.match(/<title>(.*?)<\/title>/i);
+    const title =
+      titleMatch?.[1]
+        ?.replace("Macta Beauty", "")
+        ?.replace("- Macta Beauty", "")
+        ?.trim() || "";
+
+    // PILT
+    const imgMatch = clean.match(
+      /<img[^>]+class="fotorama__img"[^>]+src="([^"]+)"/i
+    );
+    const image_url = imgMatch ? imgMatch[1] : "";
+
+    return { title, price, image_url };
+  } catch (e) {
+    return { title: "", price: 0, image_url: "" };
   }
-});
+}
 
-// ─────────────────────────────
-// 2) Nimeotsing: /price/search?query=...&shop=mactabeauty
-//    (praegu: lihtne mapping 3 testtootele)
-// ─────────────────────────────
-app.get('/price/search', async (req, res) => {
-  const query = (req.query.query || '').toLowerCase();
-  const shop = (req.query.shop || 'mactabeauty').toLowerCase();
+// ---- Otsing + live hind ----
+app.get("/price/search", async (req, res) => {
+  const shop = (req.query.shop || "mactabeauty").toLowerCase();
+  const query = (req.query.query || "").trim();
 
-  // praegu ainult Macta
-  if (shop !== 'mactabeauty' || !query) {
+  if (!query || shop !== "mactabeauty") {
     return res.json({ products: [] });
   }
 
-  // Väga lihtne MVP-mapping – ainult testimiseks.
-  const candidates = [];
+  // 1) Leia parim vaste indeksist
+  const scored = mactaIndex
+    .map((p) => ({
+      product: p,
+      score: score(query, p),
+    }))
+    .sort((a, b) => b.score - a.score);
 
-  if (query.includes('luvum')) {
-    candidates.push('https://www.mactabeauty.com/luvum-slow-aging-phyto-collagen-cream-50ml');
-  }
-  if (query.includes('friendly') || query.includes('plekieemaldaja')) {
-    candidates.push('https://www.mactabeauty.com/friendly-organic-stain-remover-orgaaniline-plekieemaldaja-250ml');
-  }
-  if (query.includes('krauterhof') || query.includes('hyaluron')) {
-    candidates.push('https://www.mactabeauty.com/krauterhof-night-cream-hyaluron-50ml');
-  }
-
-  const products = [];
-  for (const url of candidates) {
-    try {
-      const result = await fetchMactaProduct(url);
-      if (result.products && result.products[0]) {
-        products.push(result.products[0]);
-      }
-    } catch (e) {
-      // ignore ühe toote viga
-    }
+  const best = scored[0];
+  if (!best || best.score === 0) {
+    return res.json({ products: [], _debug: { query, match: "none" } });
   }
 
-  res.json({ products, _debug: { query, shop, count: products.length } });
+  // 2) Küsi live hind
+  const live = await fetchLiveData(best.product.url);
+
+  const result = {
+    title: best.product.title,
+    brand: best.product.brand,
+    price: live.price,
+    url: best.product.url,
+    image_url: live.image_url,
+    shop: "mactabeauty",
+  };
+
+  return res.json({
+    products: [result],
+    _debug: {
+      query,
+      match_score: best.score,
+      match_id: best.product.id,
+      live,
+    },
+  });
+});
+
+// Health
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", service: "price-agent" });
 });
 
 app.listen(PORT, () => {
-  console.log(`price-agent listening on port ${PORT}`);
+  console.log("price-agent listening " + PORT);
 });
