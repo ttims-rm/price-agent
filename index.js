@@ -22,7 +22,7 @@ function norm(str) {
     .trim();
 }
 
-// ---- Sarnasusskoor (väike ja kiire) ----
+// ---- Sarnasusskoor (lihtne ja kiire) ----
 function score(query, product) {
   const q = norm(query);
   const text = norm(
@@ -37,28 +37,36 @@ function score(query, product) {
   return hits;
 }
 
-// ---- Hind + info tootelehelt ----
+// ---- Hinna + pildi lugemine tootelehelt ----
 async function fetchLiveData(url) {
   try {
-    const html = await (await fetch(url)).text();
-
+    const resp = await fetch(url);
+    const html = await resp.text();
     const clean = html.replace(/\s+/g, " ");
 
-    // HIND – võta viimane number (soodushind)
-    const priceMatch = clean.match(/"price"\s*:\s*"(\d+[,\.]\d+)"/);
-    const price = priceMatch ? parseFloat(priceMatch[1].replace(",", ".")) : 0;
+    // HIND – võtame schema.org JSON-ist: "price": 29.95
+    const priceMatch = clean.match(/"price"\s*:\s*([0-9][0-9\.,]*)/);
+    const price = priceMatch
+      ? parseFloat(priceMatch[1].replace(",", "."))
+      : 0;
 
-    // PEALKIRI
-    const titleMatch = clean.match(/<title>(.*?)<\/title>/i);
-    const title =
-      titleMatch?.[1]
-        ?.replace("Macta Beauty", "")
-        ?.replace("- Macta Beauty", "")
-        ?.trim() || "";
+    // TITLE – og:title meta
+    const titleMatch = clean.match(
+      /<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i
+    );
+    let rawTitle = titleMatch ? titleMatch[1] : "";
 
-    // PILT
+    // Väike HTML entity “puhastus”
+    const title = rawTitle
+      .replace(/&#x20;/gi, " ")
+      .replace(/&#xF6;/gi, "ö")
+      .replace(/&#xE4;/gi, "ä")
+      .replace(/&amp;/gi, "&")
+      .trim();
+
+    // PILT – og:image meta
     const imgMatch = clean.match(
-      /<img[^>]+class="fotorama__img"[^>]+src="([^"]+)"/i
+      /<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i
     );
     const image_url = imgMatch ? imgMatch[1] : "";
 
@@ -90,11 +98,11 @@ app.get("/price/search", async (req, res) => {
     return res.json({ products: [], _debug: { query, match: "none" } });
   }
 
-  // 2) Küsi live hind
+  // 2) Küsi live hind/pilt otse URL-ilt
   const live = await fetchLiveData(best.product.url);
 
   const result = {
-    title: best.product.title,
+    title: live.title || best.product.title,
     brand: best.product.brand,
     price: live.price,
     url: best.product.url,
