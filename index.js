@@ -3,94 +3,101 @@ const cors = require('cors');
 const fetch = require('node-fetch');
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+
+// Väike abifunktsioon hindade leidmiseks HTML-ist
+function extractPricesFromBlock(html) {
+  const matches = [...html.matchAll(/(?:€\s*|)(\d+,\d{2})/g)];
+  return matches.map(m => parseFloat(m[1].replace(',', '.')));
+}
 
 // Health-check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-/**
- * Universaalne hinna-adapter:
- * GET /price/fetch?shop=mactabeauty&url=...
- *
- * Praegu toetab ainult MactaBeauty toodetelehti.
- */
-app.get('/price/fetch', async (req, res) => {
-  const shop = (req.query.shop || '').toLowerCase();
+// Otsime konkreetse Macta tootelehelt hinna (praegu 1 URL, 1 toode)
+app.get('/price/macta-product', async (req, res) => {
+  const shop = (req.query.shop || 'mactabeauty').toLowerCase();
   const url = (req.query.url || '').trim();
 
-  if (!shop || !url) {
-    return res.json({ products: [] });
-  }
-
-  if (shop !== 'mactabeauty') {
+  if (shop !== 'mactabeauty' || !url.startsWith('https://www.mactabeauty.com/')) {
     return res.json({ products: [] });
   }
 
   try {
-    const html = await fetch(url).then(r => r.text());
+    const response = await fetch(url);
+    const html = await response.text();
 
-    // Toote nimi (H1)
-    let title = '';
-    const h1Match = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
-    if (h1Match) {
-      title = h1Match[1].replace(/<[^>]*>/g, '').trim();
+    // Pealkiri meta og:title põhjal
+    const titleMatch = html.match(
+      /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i
+    );
+    let title = titleMatch ? titleMatch[1] : '';
+
+    // HTML entiteetidest puhastamine
+    title = title
+      .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) =>
+        String.fromCharCode(parseInt(hex, 16))
+      )
+      .replace(/&amp;/g, '&');
+
+    // Pilt meta og:image põhjal
+    const imageMatch = html.match(
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
+    );
+    const image_url = imageMatch ? imageMatch[1] : '';
+
+    // Hinnad – esmalt ainult product-info-main blokist (tootelehe "hero" ala)
+    const priceCandidatesAll = extractPricesFromBlock(html);
+    let productBlockPrices = [];
+    let price = null;
+
+    const mainIdx = html.indexOf('product-info-main');
+    if (mainIdx !== -1) {
+      const slice = html.slice(mainIdx, mainIdx + 8000);
+      productBlockPrices = extractPricesFromBlock(slice);
+
+      if (productBlockPrices.length) {
+        // võtame minimaalse hinna selles blokis – promo hind, kui olemas
+        price = Math.min(...productBlockPrices);
+      }
     }
 
-    // Hinnad – korjame kõik data-price-amount väärtused ja võtame väikseima (>0)
-    const priceMatches = [...html.matchAll(/data-price-amount="([\d.,]+)"/gi)];
-    const priceCandidates = priceMatches
-      .map(m => parseFloat(m[1].replace(',', '.')))
-      .filter(n => !isNaN(n) && n > 0);
-
-    const price =
-      priceCandidates.length > 0
-        ? Math.min(...priceCandidates)
-        : 0;
-
-    // Pilt – proovime esmalt product-galerii pilti
-    let image_url = '';
-    const imgMatch =
-      html.match(/<img[^>]+class="gallery-placeholder__image"[^>]+src="([^"]+)"/i) ||
-      html.match(/<img[^>]+class="fotorama__img"[^>]+src="([^"]+)"/i) ||
-      html.match(/<img[^>]+src="([^"]+)"[^>]+class="product-image-photo"/i);
-    if (imgMatch) {
-      image_url = imgMatch[1];
+    // Fallback, kui mingil põhjusel product-info-main ei leitud
+    if (price === null && priceCandidatesAll.length) {
+      const above10 = priceCandidatesAll.filter(p => p >= 10);
+      price = above10.length
+        ? Math.min(...above10)
+        : Math.min(...priceCandidatesAll);
     }
 
-    // Bränd – kui leiame breadcrumbis või meta väljal
-    let brand = '';
-    const brandMatch =
-      html.match(/"brand"\s*:\s*{\s*"@type"\s*:\s*"Brand"\s*,\s*"name"\s*:\s*"([^"]+)"/i) ||
-      html.match(/itemprop="brand"[^>]*>\s*<span[^>]*>([^<]+)<\/span>/i);
-    if (brandMatch) {
-      brand = brandMatch[1].trim();
-    }
-
-    const product = {
-      title,
-      brand,
-      price,
-      url,
-      image_url,
-      shop: 'mactabeauty'
-    };
+    const products = [
+      {
+        title,
+        brand: 'Luvum', // praegu kõva väärtus, hiljem teeme üldiseks
+        price: price || 0,
+        url,
+        image_url,
+        shop: 'mactabeauty'
+      }
+    ];
 
     return res.json({
-      products: price > 0 ? [product] : [],
+      products,
       _debug: {
         shop,
         url,
         title,
-        priceCandidates,
-        priceChosen: price
+        priceCandidatesAll,
+        productBlockPrices
       }
     });
-  } catch (e) {
+  } catch (err) {
     return res.json({ products: [] });
   }
 });
