@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 
 // HTML-dekooder
 function decodeHtml(str = '') {
-  return str
+  return (str || '')
     .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) =>
       String.fromCharCode(parseInt(hex, 16))
     )
@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// MactaBeauty tootelehe adapter
+// MactaBeauty tootelehe adapter – KÕIK hinnad ainult product:price:amount pealt
 app.get('/price/macta', async (req, res) => {
   const url = (req.query.url || '').trim();
   if (!url.startsWith('https://www.mactabeauty.com/')) {
@@ -36,7 +36,7 @@ app.get('/price/macta', async (req, res) => {
   try {
     const html = await fetch(url).then(r => r.text());
 
-    // --- TITLE: og:title -> schema name ---
+    // TITLE: og:title -> schema name
     let title = '';
     const ogTitleMatch = html.match(
       /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i
@@ -48,33 +48,23 @@ app.get('/price/macta', async (req, res) => {
       if (titleMatch) title = decodeHtml(titleMatch[1]);
     }
 
-    // --- BRAND ---
+    // BRAND
     let brand = '';
     const brandMatch = html.match(
       /"brand"\s*:\s*{\s*"@type":"Brand","name":"([^"]+)"/i
     );
     if (brandMatch) brand = decodeHtml(brandMatch[1]);
 
-    // --- PRICE: eelistame Klaviyo JSON-i FinalPrice ---
+    // PRICE – AINULT product:price:amount meta
     let price = 0;
-
-    const finalPriceMatch = html.match(/"FinalPrice"\s*:\s*"([\d.]+)"/i);
-    if (finalPriceMatch) {
-      price = parseFloat(finalPriceMatch[1]);
-    } else {
-      // Fallback: product:price:amount või schema price
-      const metaPriceMatch = html.match(
-        /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i
-      );
-      if (metaPriceMatch) {
-        price = parseFloat(metaPriceMatch[1].replace(',', '.'));
-      } else {
-        const schemaPriceMatch = html.match(/"price"\s*:\s*"([\d.]+)"/i);
-        if (schemaPriceMatch) price = parseFloat(schemaPriceMatch[1]);
-      }
+    const metaPriceMatch = html.match(
+      /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i
+    );
+    if (metaPriceMatch) {
+      price = parseFloat(metaPriceMatch[1].replace(',', '.'));
     }
 
-    // --- IMAGE (schema image või og:image) ---
+    // IMAGE
     let image_url = '';
     const imgJsonMatch = html.match(/"image"\s*:\s*"([^"]+)"/i);
     const imgOgMatch = html.match(
