@@ -8,25 +8,20 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// HTML-dekooder
 function decodeHtml(str = '') {
   return (str || '')
     .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) =>
       String.fromCharCode(parseInt(hex, 16))
-    )
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+    );
 }
 
-// Health
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// MactaBeauty tootelehe adapter – KÕIK hinnad ainult product:price:amount pealt
+// ───────────────────────────────
+// MAC TA BEAUTY – FIKSEERITUD HINNA PARSER
+// ───────────────────────────────
 app.get('/price/macta', async (req, res) => {
   const url = (req.query.url || '').trim();
   if (!url.startsWith('https://www.mactabeauty.com/')) {
@@ -36,63 +31,50 @@ app.get('/price/macta', async (req, res) => {
   try {
     const html = await fetch(url).then(r => r.text());
 
-    // TITLE: og:title -> schema name
+    // TITLE (og:title)
     let title = '';
-    const ogTitleMatch = html.match(
+    const t = html.match(
       /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i
     );
-    if (ogTitleMatch) {
-      title = decodeHtml(ogTitleMatch[1]);
-    } else {
-      const titleMatch = html.match(/"name"\s*:\s*"([^"]+)"/i);
-      if (titleMatch) title = decodeHtml(titleMatch[1]);
-    }
+    if (t) title = decodeHtml(t[1]);
 
-    // BRAND
+    // BRAND (schema.org)
     let brand = '';
-    const brandMatch = html.match(
-      /"brand"\s*:\s*{\s*"@type":"Brand","name":"([^"]+)"/i
-    );
-    if (brandMatch) brand = decodeHtml(brandMatch[1]);
+    const b = html.match(/"brand":\{"@type":"Brand","name":"([^"]+)"/i);
+    if (b) brand = decodeHtml(b[1]);
 
-    // PRICE – AINULT product:price:amount meta
+    // PRICE (AINULT product:price:amount → stabiilne)
     let price = 0;
-    const metaPriceMatch = html.match(
+    const pm = html.match(
       /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i
     );
-    if (metaPriceMatch) {
-      price = parseFloat(metaPriceMatch[1].replace(',', '.'));
-    }
+    if (pm) price = parseFloat(pm[1].replace(',', '.'));
 
     // IMAGE
-    let image_url = '';
-    const imgJsonMatch = html.match(/"image"\s*:\s*"([^"]+)"/i);
-    const imgOgMatch = html.match(
+    let image = '';
+    const im = html.match(
       /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
     );
-    if (imgJsonMatch) image_url = imgJsonMatch[1];
-    else if (imgOgMatch) image_url = imgOgMatch[1];
-
-    image_url = image_url.replace(/\\\//g, '/');
+    if (im) image = im[1].replace(/\\\//g, '/');
 
     const product = {
       title,
       brand,
       price,
       url,
-      image_url,
+      image_url: image,
       shop: 'mactabeauty'
     };
 
     return res.json({
       products: price > 0 ? [product] : [],
-      _debug: { url, title, brand, price, image_url }
+      _debug: { url, title, brand, price, image }
     });
-  } catch (err) {
+  } catch (e) {
     return res.json({ products: [] });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`price-agent listening on port ${PORT}`);
+  console.log(`price-agent on port ${PORT}`);
 });
