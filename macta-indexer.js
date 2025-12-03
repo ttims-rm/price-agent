@@ -19,9 +19,9 @@ async function fetchCategory(url) {
 
   const html = await res.text();
 
-  const matches = [...html.matchAll(
-    /<a[^>]+class=["']product-item-link["'][^>]*href=["']([^"']+)["']/gi
-  )];
+const matches = [...html.matchAll(
+  /<a[^>]+href=["']([^"']+)["'][^>]*class=["'][^"']*product-item-link[^"']*["'][^>]*>/gi
+)];
 
   const urls = matches
     .map((m) => m[1])
