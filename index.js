@@ -61,6 +61,7 @@ async function fetchLiveData(url) {
       .replace(/&#x20;/gi, " ")
       .replace(/&#xF6;/gi, "ö")
       .replace(/&#xE4;/gi, "ä")
+      .replace(/&#xFC;/gi, "ü")
       .replace(/&amp;/gi, "&")
       .trim();
 
