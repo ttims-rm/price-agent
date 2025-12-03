@@ -9,6 +9,9 @@ const URLS = [
 
   // Kräuterhof
   'https://www.mactabeauty.com/krauterhof-night-cream-hyaluron-50ml',
+  
+  // Olaplex
+  'https://www.mactabeauty.com/olaplex-volumizing-blow-dry-mist-150ml',
 ];
 
 (function main() {
