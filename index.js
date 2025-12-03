@@ -8,7 +8,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Väike HTML-dekooder (&#x20; jne)
+// HTML-dekooder
 function decodeHtml(str = '') {
   return str
     .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) =>
@@ -36,7 +36,7 @@ app.get('/price/macta', async (req, res) => {
   try {
     const html = await fetch(url).then(r => r.text());
 
-    // --- TITLE: esmalt og:title, siis schema.org name ---
+    // --- TITLE: og:title -> schema name ---
     let title = '';
     const ogTitleMatch = html.match(
       /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i
@@ -48,29 +48,33 @@ app.get('/price/macta', async (req, res) => {
       if (titleMatch) title = decodeHtml(titleMatch[1]);
     }
 
-    // --- BRAND (schema.org brand) ---
+    // --- BRAND ---
     let brand = '';
     const brandMatch = html.match(
       /"brand"\s*:\s*{\s*"@type":"Brand","name":"([^"]+)"/i
     );
     if (brandMatch) brand = decodeHtml(brandMatch[1]);
 
-    // --- PRICE ---
-    // 1) eelistame meta property="product:price:amount"  (promo / kehtiv hind)
-    // 2) fallback: schema.org "price"
+    // --- PRICE: eelistame FinalPrice skriptiblokist ---
     let price = 0;
 
-    const metaPriceMatch = html.match(
-      /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i
-    );
-    if (metaPriceMatch) {
-      price = parseFloat(metaPriceMatch[1].replace(',', '.'));
+    const finalPriceMatch = html.match(/FinalPrice[^0-9]*([\d.,]+)/i);
+    if (finalPriceMatch) {
+      price = parseFloat(finalPriceMatch[1].replace(',', '.'));
     } else {
-      const schemaPriceMatch = html.match(/"price"\s*:\s*"([\d.]+)"/i);
-      if (schemaPriceMatch) price = parseFloat(schemaPriceMatch[1]);
+      // Fallback: product:price:amount või schema price
+      const metaPriceMatch = html.match(
+        /<meta[^>]+property=["']product:price:amount["'][^>]+content=["']([^"']+)["']/i
+      );
+      if (metaPriceMatch) {
+        price = parseFloat(metaPriceMatch[1].replace(',', '.'));
+      } else {
+        const schemaPriceMatch = html.match(/"price"\s*:\s*"([\d.]+)"/i);
+        if (schemaPriceMatch) price = parseFloat(schemaPriceMatch[1]);
+      }
     }
 
-    // --- IMAGE (schema.org image või og:image) ---
+    // --- IMAGE (schema image või og:image) ---
     let image_url = '';
     const imgJsonMatch = html.match(/"image"\s*:\s*"([^"]+)"/i);
     const imgOgMatch = html.match(
