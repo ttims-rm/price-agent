@@ -62,6 +62,9 @@ const MANUAL_ALIASES = {
   'https://www.mactabeauty.com/krauterhof-night-cream-hyaluron-50ml': [
     'krauterhof hyaluron öökreem 50ml',
   ],
+    'https://www.mactabeauty.com/olaplex-volumizing-blow-dry-mist-150ml': [
+    'olaplex volumizing blow dry mist 150ml',
+  ],
 };
 
 function normalize(str) {
