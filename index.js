@@ -8,68 +8,51 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Health-check
+// Health
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'price-agent' });
 });
 
-// MactaBeauty – tootelehe hinna adapter
+// MactaBeauty tootelehe adapter
 app.get('/price/macta', async (req, res) => {
   const url = (req.query.url || '').trim();
-
-  if (!url || !url.startsWith('https://www.mactabeauty.com/')) {
+  if (!url.startsWith("https://www.mactabeauty.com/")) {
     return res.json({ products: [] });
   }
 
   try {
     const html = await fetch(url).then(r => r.text());
 
-    // --- Pealkiri ---
-    let title = '';
-    const h1 = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
-    if (h1) title = h1[1].replace(/<[^>]*>/g, '').trim();
+    // --- TITLE (product.name schema.org meta) ---
+    let title = "";
+    const titleMatch = html.match(/"name"\s*:\s*"([^"]+)"/i);
+    if (titleMatch) title = titleMatch[1];
 
-    // --- Pilt ---
-    let image_url = '';
-    const img = html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i);
-    if (img) image_url = img[1];
+    // --- BRAND (schema.org brand) ---
+    let brand = "";
+    const brandMatch = html.match(/"brand"\s*:\s*{\s*"@type":"Brand","name":"([^"]+)"/i);
+    if (brandMatch) brand = brandMatch[1];
 
-    // --- Bränd ---
-    let brand = '';
-    const brandMeta = html.match(/"brand"\s*:\s*{\s*"@type":"Brand","name":"([^"]+)"/i);
-    if (brandMeta) brand = brandMeta[1].trim();
-
-    // --- Hind (võtan ainult “product-info-main” blokist) ---
+    // --- PRICE (schema.org price) ---
     let price = 0;
-    const mainIndex = html.indexOf('product-info-main');
-    if (mainIndex !== -1) {
-      const slice = html.slice(mainIndex, mainIndex + 8000);
-      const matches = [...slice.matchAll(/data-price-amount="([\d.,]+)"/gi)];
+    const priceMatch = html.match(/"price"\s*:\s*"([\d.]+)"/i);
+    if (priceMatch) price = parseFloat(priceMatch[1]);
 
-      const nums = matches
-        .map(m => parseFloat(m[1].replace(',', '.')))
-        .filter(n => !isNaN(n) && n > 0);
-
-      if (nums.length) price = Math.min(...nums);
-    }
-
-    const product = {
-      title,
-      brand,
-      price,
-      url,
-      image_url,
-      shop: 'mactabeauty'
-    };
+    // --- IMAGE (schema.org image) ---
+    let image_url = "";
+    const imgMatch = html.match(/"image"\s*:\s*"([^"]+)"/i);
+    if (imgMatch) image_url = imgMatch[1];
 
     return res.json({
-      products: price > 0 ? [product] : [],
-      _debug: {
-        url,
+      products: price > 0 ? [{
         title,
         brand,
-        price
-      }
+        price,
+        url,
+        image_url,
+        shop: "mactabeauty"
+      }] : [],
+      _debug: { url, title, brand, price, image_url }
     });
 
   } catch (err) {
